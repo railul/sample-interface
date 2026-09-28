@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    color: #131722;
+    background-color: #FFFFFF;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  }
+
+  .dark body {
+    color: #D1D4DC;
+    background-color: #131722;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.tv-btn-gradient {
+  background: linear-gradient(90deg, #0052FE 0%, #7000FF 100%);
+  transition: filter 0.2s ease, transform 0.15s ease;
+}
+.tv-btn-gradient:hover {
+  filter: brightness(1.1);
+}
+.tv-btn-gradient:active {
+  transform: scale(0.98);
+}
+
+.hover-card {
+  transition: box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1), transform 0.2s cubic-bezier(0.2, 0, 0, 1), background-color 0.15s ease;
+}
+.hover-card:hover {
+  box-shadow: 0 8px 24px -4px rgba(19, 23, 34, 0.08);
+  transform: translateY(-2px);
+}
+
+@keyframes flash-green {
+  0% { background-color: rgba(8, 153, 129, 0.25); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash-red {
+  0% { background-color: rgba(242, 54, 69, 0.25); }
+  100% { background-color: transparent; }
+}
+
+.tick-up {
+  animation: flash-green 1.2s ease-out;
+}
+
+.tick-down {
+  animation: flash-red 1.2s ease-out;
+}
