@@ -23,13 +23,14 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
   if (!item) return null;
 
   const isStock = 'ticker' in item;
-  const ticker = isStock ? item.ticker : item.symbol;
-  const name = item.name;
-  const price = item.price;
-  const currency = isStock ? item.currency : 'USD';
-  const change = item.change;
-  const changePercent = item.changePercent;
+  const ticker = (isStock ? item.ticker : item.symbol) || 'UNKNOWN';
+  const name = item.name || ticker;
+  const price = typeof item.price === 'number' && !isNaN(item.price) ? item.price : 100;
+  const currency = (isStock ? item.currency : 'USD') || 'USD';
+  const change = typeof item.change === 'number' && !isNaN(item.change) ? item.change : 0;
+  const changePercent = typeof item.changePercent === 'number' && !isNaN(item.changePercent) ? item.changePercent : 0;
   const isUp = change >= 0;
+  const badge = item.badge || { text: ticker.slice(0, 2), bg: '#2962FF', textColor: '#ffffff' };
   const exchangeName = isStock ? item.details?.exchange : item.exchange;
   const peRatio = isStock ? item.details?.peRatio : undefined;
   const analystRating = isStock ? item.details?.analystRating : undefined;
@@ -72,7 +73,12 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
         break;
     }
 
-    const basePrice = isUp ? price * (1 - changePercent / 100) : price * (1 + Math.abs(changePercent) / 100);
+    const safeChangePercent = isNaN(changePercent) ? 0 : changePercent;
+    const basePrice = Math.max(
+      0.001,
+      isUp ? price * (1 - safeChangePercent / 100) : price * (1 + Math.abs(safeChangePercent) / 100)
+    );
+
     const data: Array<{
       time: string;
       open: number;
@@ -85,10 +91,10 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
     let current = basePrice;
     for (let i = 0; i < count; i++) {
       const step = (Math.sin(i / 3) * 0.5 + (Math.random() - 0.48) + trendFactor) * (price * volatility * 0.1);
-      const open = current;
-      const close = i === count - 1 ? price : Math.max(open + step, price * 0.5);
+      const open = Math.max(0.0001, current);
+      const close = i === count - 1 ? price : Math.max(0.0001, Math.max(open + step, price * 0.5));
       const high = Math.max(open, close) + Math.random() * (price * 0.004);
-      const low = Math.min(open, close) - Math.random() * (price * 0.004);
+      const low = Math.max(0.0001, Math.min(open, close) - Math.random() * (price * 0.004));
       const volume = Math.floor(Math.random() * 500000 + 100000);
 
       const timeLabel = timeframe === '1D'
@@ -102,25 +108,51 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
   }, [timeframe, price, changePercent, isUp]);
 
   // Chart dimensions & scaling
-  const minVal = Math.min(...chartPoints.map(d => d.low));
-  const maxVal = Math.max(...chartPoints.map(d => d.high));
-  const range = maxVal - minVal || 1;
+  const lows = chartPoints.map(d => d.low).filter(v => typeof v === 'number' && !isNaN(v));
+  const highs = chartPoints.map(d => d.high).filter(v => typeof v === 'number' && !isNaN(v));
+  const minVal = lows.length > 0 ? Math.min(...lows) : price * 0.95;
+  const maxVal = highs.length > 0 ? Math.max(...highs) : price * 1.05;
+  const range = (maxVal - minVal) > 0 ? (maxVal - minVal) : (price * 0.1 || 1);
   const chartWidth = 720;
   const chartHeight = 240;
 
-  const pointsString = chartPoints
-    .map((d, i) => {
-      const x = (i / (chartPoints.length - 1)) * chartWidth;
-      const y = chartHeight - ((d.close - minVal) / range) * (chartHeight - 30) - 15;
-      return `${x},${y}`;
-    })
-    .join(' ');
+  const pointsString = chartPoints.length > 1
+    ? chartPoints
+        .map((d, i) => {
+          const x = (i / (chartPoints.length - 1)) * chartWidth;
+          const y = Math.max(
+            8,
+            Math.min(chartHeight - 8, chartHeight - ((d.close - minVal) / range) * (chartHeight - 30) - 15)
+          );
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(' ')
+    : `0,${chartHeight / 2} ${chartWidth},${chartHeight / 2}`;
 
   const areaPoints = `0,${chartHeight} ${pointsString} ${chartWidth},${chartHeight}`;
 
-  const activePoint = hoverIndex !== null && chartPoints[hoverIndex]
+  const activePoint = (hoverIndex !== null && chartPoints[hoverIndex])
     ? chartPoints[hoverIndex]
-    : chartPoints[chartPoints.length - 1];
+    : (chartPoints[chartPoints.length - 1] || {
+        time: 'Now',
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        volume: 100000
+      });
+
+  const formattedClose = typeof activePoint?.close === 'number' && !isNaN(activePoint.close)
+    ? activePoint.close.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : String(price);
+
+  const formattedChange = (isUp ? '+' : '') + (typeof change === 'number' && !isNaN(change) ? change.toFixed(2) : '0.00');
+  const formattedChangePercent = (isUp ? '+' : '') + (typeof changePercent === 'number' && !isNaN(changePercent) ? changePercent.toFixed(2) : '0.00');
+
+  const maxVol = useMemo(() => {
+    const vols = chartPoints.map(p => p.volume).filter(v => typeof v === 'number' && !isNaN(v));
+    return vols.length > 0 ? Math.max(...vols) : 1;
+  }, [chartPoints]);
 
   const handleNotify = (msg: string) => {
     setShowNotification(msg);
@@ -138,14 +170,14 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
       >
         {/* Header bar */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E0E3EB] dark:border-[#2A2E39]">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-white shadow-sm"
-              style={{ backgroundColor: item.badge.bg, color: item.badge.textColor || '#ffffff' }}
+              className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-white shadow-xs shrink-0"
+              style={{ backgroundColor: badge.bg, color: badge.textColor || '#ffffff' }}
             >
-              {item.badge.text}
+              {badge.text}
             </div>
-            <div>
+            <div className="min-w-0 truncate">
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-bold text-[#131722] dark:text-white leading-tight">
                   {ticker}
@@ -153,21 +185,21 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
                 <span className="text-xs px-2 py-0.5 rounded font-semibold bg-[#F0F3FA] dark:bg-[#2A2E39] text-[#6A6D78] dark:text-[#848E9C]">
                   {exchangeName || 'Global Market'}
                 </span>
-                <span className="text-xs text-[#089981] flex items-center gap-1 font-medium bg-[#E8F5EE] dark:bg-[#089981]/20 px-2 py-0.5 rounded-full">
+                <span className="text-xs text-[#089981] flex items-center gap-1 font-medium bg-[#E8F5EE] dark:bg-[#089981]/20 px-2 py-0.5 rounded-full shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#089981] animate-pulse"></span>
                   Real-time
                 </span>
               </div>
-              <p className="text-xs text-[#6A6D78] dark:text-[#848E9C]">
+              <p className="text-xs text-[#6A6D78] dark:text-[#848E9C] truncate">
                 {name}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => onToggleWatchlist(ticker)}
-              className={`p-2 rounded-xl border transition-all ${
+              className={`p-2 rounded-xl border transition-all cursor-pointer ${
                 isWatchlisted
                   ? 'border-[#FF9900] bg-[#FFF8E7] text-[#FF9900] dark:bg-[#FF9900]/10'
                   : 'border-[#E0E3EB] dark:border-[#2A2E39] text-[#6A6D78] hover:text-[#131722] dark:hover:text-white'
@@ -179,7 +211,7 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
 
             <button
               onClick={() => handleNotify(`Price alert set for ${ticker}`)}
-              className="p-2 rounded-xl border border-[#E0E3EB] dark:border-[#2A2E39] text-[#6A6D78] hover:text-[#131722] dark:hover:text-white hover:bg-[#F0F3FA] dark:hover:bg-[#2A2E39] transition"
+              className="p-2 rounded-xl border border-[#E0E3EB] dark:border-[#2A2E39] text-[#6A6D78] hover:text-[#131722] dark:hover:text-white hover:bg-[#F0F3FA] dark:hover:bg-[#2A2E39] transition cursor-pointer"
               title="Set Alert"
             >
               <Bell className="w-5 h-5" />
@@ -187,10 +219,12 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
 
             <button
               onClick={() => {
-                navigator.clipboard.writeText(window.location.href);
+                if (navigator?.clipboard) {
+                  navigator.clipboard.writeText(window.location.href).catch(() => {});
+                }
                 handleNotify('Link copied to clipboard!');
               }}
-              className="p-2 rounded-xl border border-[#E0E3EB] dark:border-[#2A2E39] text-[#6A6D78] hover:text-[#131722] dark:hover:text-white hover:bg-[#F0F3FA] dark:hover:bg-[#2A2E39] transition"
+              className="p-2 rounded-xl border border-[#E0E3EB] dark:border-[#2A2E39] text-[#6A6D78] hover:text-[#131722] dark:hover:text-white hover:bg-[#F0F3FA] dark:hover:bg-[#2A2E39] transition cursor-pointer"
               title="Share"
             >
               <Share2 className="w-5 h-5" />
@@ -198,7 +232,7 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-2 rounded-xl text-[#6A6D78] hover:text-[#131722] dark:hover:text-white hover:bg-[#F0F3FA] dark:hover:bg-[#2A2E39] transition"
+              className="p-2 rounded-xl text-[#6A6D78] hover:text-[#131722] dark:hover:text-white hover:bg-[#F0F3FA] dark:hover:bg-[#2A2E39] transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -209,7 +243,7 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
         <div className="px-6 py-4 bg-[#F8FAFD] dark:bg-[#181B22] border-b border-[#E0E3EB] dark:border-[#2A2E39] flex flex-wrap items-baseline justify-between gap-4">
           <div className="flex items-baseline gap-3">
             <span className="text-3xl font-extrabold text-[#131722] dark:text-white tabular-nums tracking-tight">
-              {activePoint.close.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currency}
+              {formattedClose} {currency}
             </span>
             <div className={`flex items-center text-sm font-bold gap-1 px-2.5 py-1 rounded-md tabular-nums ${
               isUp 
@@ -217,10 +251,10 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
                 : 'text-[#F23645] bg-[#FDECEE] dark:bg-[#F23645]/20'
             }`}>
               {isUp ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              <span>{isUp ? '+' : ''}{change.toFixed(2)}</span>
-              <span>({isUp ? '+' : ''}{changePercent.toFixed(2)}%)</span>
+              <span>{formattedChange}</span>
+              <span>({formattedChangePercent}%)</span>
             </div>
-            {hoverIndex !== null && (
+            {hoverIndex !== null && activePoint?.time && (
               <span className="text-xs text-[#6A6D78] dark:text-[#848E9C]">
                 {activePoint.time}
               </span>
@@ -234,9 +268,9 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
                 <button
                   key={tf}
                   onClick={() => setTimeframe(tf)}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                     timeframe === tf
-                      ? 'bg-white dark:bg-[#1E222D] text-[#131722] dark:text-white shadow-sm'
+                      ? 'bg-white dark:bg-[#1E222D] text-[#131722] dark:text-white shadow-2xs'
                       : 'text-[#6A6D78] dark:text-[#848E9C] hover:text-[#131722] dark:hover:text-white'
                   }`}
                 >
@@ -248,9 +282,9 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
             <div className="inline-flex p-1 bg-[#F0F3FA] dark:bg-[#2A2E39] rounded-xl text-xs">
               <button
                 onClick={() => setChartType('area')}
-                className={`p-1.5 rounded-lg transition ${
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
                   chartType === 'area'
-                    ? 'bg-white dark:bg-[#1E222D] text-[#2962FF] shadow-sm'
+                    ? 'bg-white dark:bg-[#1E222D] text-[#2962FF] shadow-2xs'
                     : 'text-[#6A6D78] dark:text-[#848E9C]'
                 }`}
                 title="Area Chart"
@@ -259,9 +293,9 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
               </button>
               <button
                 onClick={() => setChartType('candles')}
-                className={`p-1.5 rounded-lg transition ${
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
                   chartType === 'candles'
-                    ? 'bg-white dark:bg-[#1E222D] text-[#2962FF] shadow-sm'
+                    ? 'bg-white dark:bg-[#1E222D] text-[#2962FF] shadow-2xs'
                     : 'text-[#6A6D78] dark:text-[#848E9C]'
                 }`}
                 title="Candlestick Chart"
@@ -372,46 +406,43 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
               )}
 
               {/* Hover Crosshair */}
-              {hoverIndex !== null && (
-                <>
-                  {(() => {
-                    const x = (hoverIndex / (chartPoints.length - 1)) * chartWidth;
-                    const y = chartHeight - ((activePoint.close - minVal) / range) * (chartHeight - 30) - 15;
-                    return (
-                      <g>
-                        <line
-                          x1={x}
-                          y1="0"
-                          x2={x}
-                          y2={chartHeight}
-                          stroke="#2962FF"
-                          strokeDasharray="3 3"
-                          strokeWidth="1.5"
-                        />
-                        <circle
-                          cx={x}
-                          cy={y}
-                          r="5"
-                          fill="#2962FF"
-                          stroke="#FFFFFF"
-                          strokeWidth="2"
-                        />
-                      </g>
-                    );
-                  })()}
-                </>
+              {hoverIndex !== null && activePoint && (
+                (() => {
+                  const x = (hoverIndex / (chartPoints.length - 1)) * chartWidth;
+                  const y = chartHeight - ((activePoint.close - minVal) / range) * (chartHeight - 30) - 15;
+                  return (
+                    <g>
+                      <line
+                        x1={x}
+                        y1="0"
+                        x2={x}
+                        y2={chartHeight}
+                        stroke="#2962FF"
+                        strokeDasharray="3 3"
+                        strokeWidth="1.5"
+                      />
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r="5"
+                        fill="#2962FF"
+                        stroke="#FFFFFF"
+                        strokeWidth="2"
+                      />
+                    </g>
+                  );
+                })()
               )}
             </svg>
 
             {/* Volume indicator bars at bottom */}
             <div className="h-8 flex items-end gap-[2px] mt-2 opacity-40">
               {chartPoints.map((d, i) => {
-                const maxVol = Math.max(...chartPoints.map(p => p.volume));
-                const barH = (d.volume / maxVol) * 100;
+                const barH = Math.min(100, Math.max(2, (d.volume / maxVol) * 100));
                 return (
                   <div
                     key={i}
-                    className="flex-1 rounded-t-sm"
+                    className="flex-1 rounded-t-xs"
                     style={{
                       height: `${barH}%`,
                       backgroundColor: d.close >= d.open ? '#089981' : '#F23645'
@@ -516,7 +547,7 @@ export const TickerDetailModal: React.FC<TickerDetailModalProps> = ({
             <div className="pt-2">
               <button
                 onClick={() => handleNotify(`Simulated market order placed for ${ticker}!`)}
-                className="w-full py-2.5 px-4 bg-[#2962FF] hover:bg-[#1E53E5] text-white rounded-xl font-semibold text-xs transition shadow-sm flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 px-4 bg-[#2962FF] hover:bg-[#1E53E5] text-white rounded-xl font-semibold text-xs transition shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <ShieldCheck className="w-4 h-4" />
                 Place Simulated Trade

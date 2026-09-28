@@ -13,6 +13,7 @@ import { TickerDetailModal } from './components/TickerDetailModal';
 import { WatchlistDrawer } from './components/WatchlistDrawer';
 import { AuthModal } from './components/AuthModal';
 import { MarketsEverywhereDropdown } from './components/MarketsEverywhereDropdown';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 type SortColumn = 'ticker' | 'price' | 'change' | 'changePercent' | 'marketCap' | 'volume';
 type SortDirection = 'asc' | 'desc';
@@ -33,24 +34,36 @@ export default function App() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  // Watchlist stored in state
+  // Watchlist stored in state safely
   const [watchlist, setWatchlist] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem('tv_watchlist');
-      return saved ? JSON.parse(saved) : ['NVDA', 'AAPL', 'BTC/USD'];
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = localStorage.getItem('tv_watchlist');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      }
     } catch {
-      return ['NVDA', 'AAPL', 'BTC/USD'];
+      // Cross-origin iframe security fallback
     }
+    return ['NVDA', 'AAPL', 'BTC/USD'];
   });
 
-  // User state
+  // User state safely
   const [user, setUser] = useState<{ name: string; email: string } | null>(() => {
     try {
-      const saved = localStorage.getItem('tv_user');
-      return saved ? JSON.parse(saved) : null;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = localStorage.getItem('tv_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && typeof parsed === 'object') return parsed;
+        }
+      }
     } catch {
-      return null;
+      // Cross-origin iframe security fallback
     }
+    return null;
   });
 
   // Synchronize dark mode class on document
@@ -62,20 +75,29 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Persist watchlist
+  // Persist watchlist safely
   useEffect(() => {
     try {
-      localStorage.setItem('tv_watchlist', JSON.stringify(watchlist));
-    } catch (e) {
-      console.error(e);
+      if (typeof window !== 'undefined' && window.localStorage && Array.isArray(watchlist)) {
+        localStorage.setItem('tv_watchlist', JSON.stringify(watchlist));
+      }
+    } catch {
+      // Ignore
     }
   }, [watchlist]);
 
   const toggleWatchlist = (ticker: string) => {
-    setWatchlist(prev =>
-      prev.includes(ticker) ? prev.filter(t => t !== ticker) : [...prev, ticker]
-    );
+    setWatchlist(prev => {
+      const list = Array.isArray(prev) ? prev : [];
+      return list.includes(ticker) ? list.filter(t => t !== ticker) : [...list, ticker];
+    });
   };
+
+  const isSelectedWatchlisted = useMemo(() => {
+    if (!selectedDetailItem || !Array.isArray(watchlist)) return false;
+    const sym = 'ticker' in selectedDetailItem ? selectedDetailItem.ticker : selectedDetailItem.symbol;
+    return watchlist.includes(sym);
+  }, [selectedDetailItem, watchlist]);
 
   // Keyboard shortcut Ctrl+K / Cmd+K
   useEffect(() => {
@@ -598,12 +620,38 @@ export default function App() {
       <Footer />
 
       {/* Ticker Interactive Chart Detail Modal */}
-      <TickerDetailModal
-        item={selectedDetailItem}
-        onClose={() => setSelectedDetailItem(null)}
-        isWatchlisted={selectedDetailItem ? watchlist.includes('ticker' in selectedDetailItem ? selectedDetailItem.ticker : selectedDetailItem.symbol) : false}
-        onToggleWatchlist={toggleWatchlist}
-      />
+      {selectedDetailItem && (
+        <ErrorBoundary
+          fallback={
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+              onClick={() => setSelectedDetailItem(null)}
+            >
+              <div
+                className="bg-white dark:bg-[#1E222D] p-6 rounded-2xl max-w-sm w-full text-center space-y-4 shadow-2xl"
+                onClick={e => e.stopPropagation()}
+              >
+                <p className="text-sm font-semibold text-[#131722] dark:text-white">
+                  Unable to load ticker details
+                </p>
+                <button
+                  onClick={() => setSelectedDetailItem(null)}
+                  className="px-4 py-2 bg-[#2962FF] hover:bg-[#1E53E5] text-white rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          }
+        >
+          <TickerDetailModal
+            item={selectedDetailItem}
+            onClose={() => setSelectedDetailItem(null)}
+            isWatchlisted={isSelectedWatchlisted}
+            onToggleWatchlist={toggleWatchlist}
+          />
+        </ErrorBoundary>
+      )}
 
       {/* Global Search Dialog Modal (Ctrl+K) */}
       <SearchModal
